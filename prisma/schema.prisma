@@ -1,0 +1,207 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// ENUMS
+enum UserRole {
+  USER
+  ADMIN
+  SUPERADMIN
+}
+
+enum TournamentStatus {
+  UPCOMING
+  ONGOING
+  FINISHED
+  CANCELLED
+}
+
+enum MatchStatus {
+  SCHEDULED
+  IN_PROGRESS
+  FINISHED
+  CANCELLED
+}
+
+enum MatchResult {
+  WIN
+  LOSS
+  DRAW
+}
+
+model User {
+  id                 BigInt       @id @default(autoincrement()) @map("id")
+  username           String       @unique
+  email              String       @unique
+  password           String
+  role               UserRole     @default(USER)
+  isActive           Boolean      @default(true)
+  country            String?
+  activationLink     String?
+  token              String?
+  otp_code           String?
+  otp_expire         DateTime?
+  resetLink          String?
+  birthDate          DateTime?    @map("birth_date")
+  createdAt          DateTime     @default(now()) @map("created_at")
+  // relations
+  playersCreated     Player[]     @relation("player_created_by")
+  tournamentsCreated Tournament[] @relation("tournament_created_by")
+  comments           Comment[]
+}
+
+model Player {
+  id          BigInt    @id @default(autoincrement())
+  fullName    String    @map("full_name")
+  birthDate   DateTime? @map("birth_date")
+  rating      Int?
+  country     String?
+  createdById BigInt?
+  createdBy   User?     @relation("player_created_by", fields: [createdById], references: [id], onDelete: SetNull)
+  points      Int       @default(0)
+  passportId  String?   @map("passport_id")
+  phone       String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // relations
+  tournamentPlayers TournamentPlayer[]
+  pairingsAsWhite   Pairing[]          @relation("whitePlayer")
+  pairingsAsBlack   Pairing[]          @relation("blackPlayer")
+  resultsWon        ResultOfMatch[]    @relation("wonPlayer")
+  resultsLost       ResultOfMatch[]    @relation("lostPlayer")
+  standings         Standing[]
+  comments          Comment[]
+}
+
+model Tournament {
+  id          BigInt           @id @default(autoincrement())
+  name        String
+  location    String?
+  startDate   DateTime?        @map("start_date")
+  endDate     DateTime?        @map("end_date")
+  status      TournamentStatus @default(UPCOMING)
+  createdById BigInt?
+  createdBy   User?            @relation("tournament_created_by", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  // relations
+  tournamentPlayers TournamentPlayer[]
+  matches           Match[]
+  pairings          Pairing[]
+  standings         Standing[]
+}
+
+model TournamentPlayer {
+  id           BigInt   @id @default(autoincrement())
+  playerId     BigInt
+  tournamentId BigInt
+  seedNumber   Int?     @map("seed_number")
+  registeredAt DateTime @default(now()) @map("registered_at")
+
+  player     Player     @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, tournamentId], name: "unique_player_per_tournament")
+  @@index([tournamentId], name: "idx_tournament_players_tournament")
+}
+
+model Match {
+  id           BigInt      @id @default(autoincrement())
+  tournamentId BigInt
+  startTime    DateTime?   @map("start_time")
+  endTime      DateTime?   @map("end_time")
+  status       MatchStatus @default(SCHEDULED)
+  pairingId    BigInt?     @unique @map("pairing_id")
+  tableNumber  Int?        @map("table_number")
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  tournament Tournament     @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  pairing    Pairing?       @relation(fields: [pairingId], references: [id], onDelete: SetNull)
+  result     ResultOfMatch?
+  comments   Comment[]
+
+  @@index([tournamentId], name: "idx_matches_tournament")
+}
+
+model Pairing {
+  id           BigInt  @id @default(autoincrement())
+  tournamentId BigInt
+  round        Int
+  whiteId      BigInt
+  blackId      BigInt
+  isConfirmed  Boolean @default(false) @map("is_confirmed")
+
+  tournament  Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  whitePlayer Player     @relation("whitePlayer", fields: [whiteId], references: [id], onDelete: Cascade)
+  blackPlayer Player     @relation("blackPlayer", fields: [blackId], references: [id], onDelete: Cascade)
+  match       Match? // optional relation if you link Match to Pairing via match.pairingId
+
+  @@unique([tournamentId, round, whiteId, blackId], name: "unique_pairing_per_round")
+  @@index([tournamentId], name: "idx_pairings_tournament")
+}
+
+model ResultOfMatch {
+  id           BigInt      @id @default(autoincrement())
+  matchId      BigInt      @unique
+  wonPlayerId  BigInt?
+  lostPlayerId BigInt?
+  result       MatchResult
+  isDraw       Boolean     @default(false)
+  reason       String?
+  duration     Int? // seconds
+  playedAt     DateTime?   @map("played_at")
+
+  match      Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  wonPlayer  Player? @relation("wonPlayer", fields: [wonPlayerId], references: [id], onDelete: SetNull)
+  lostPlayer Player? @relation("lostPlayer", fields: [lostPlayerId], references: [id], onDelete: SetNull)
+}
+
+model Standing {
+  id                   BigInt   @id @default(autoincrement())
+  playerId             BigInt
+  tournamentId         BigInt
+  points               Float    @default(0)
+  rank                 Int?
+  buchholzScore        Float?   @map("buchholz_score")
+  sonnebornBergerScore Float?   @map("sonneborn_berger_score")
+  wins                 Int      @default(0)
+  losses               Int      @default(0)
+  draws                Int      @default(0)
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  player     Player     @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, tournamentId], name: "unique_standing_per_tournament")
+  @@index([tournamentId], name: "idx_standings_tournament")
+}
+
+model Comment {
+  id        BigInt   @id @default(autoincrement())
+  userId    BigInt
+  matchId   BigInt?
+  playerId  BigInt?
+  content   String   @map("comment")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  match  Match?  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  player Player? @relation(fields: [playerId], references: [id], onDelete: Cascade)
+}
